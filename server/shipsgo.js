@@ -1,14 +1,14 @@
-// Client for the ShipsGo v1.2 REST API (https://shipsgo.com/api-documentation).
+// Client for the real ShipsGo v2 API (https://api.shipsgo.com/docs/v2/).
 //
-// Why v1.2 and not their newer v2: v2 isn't fully/officially documented in a
-// stable public spec at the time this was written, while v1.2 has a complete
-// official reference (form-encoded POST to create a tracking request, then
-// GET to poll for voyage data using the returned requestId). ShipsGo's free
-// signup includes 3 tracking credits and, per their own FAQ, "no limitation
-// for posting tracking requests; or making a call for getting voyage data" —
-// unlike Terminal49's free tier, reads aren't paywalled.
+// Confirmed directly from ShipsGo's official interactive API docs (not the
+// older v1.2 REST API, which uses a different auth scheme entirely and
+// turned out to be the wrong target — see README for the story):
+//   - Base URL: https://api.shipsgo.com/v2
+//   - Auth: header `X-Shipsgo-User-Token: <token>` (token from the ShipsGo
+//     dashboard's "ShipsGo API" section, labeled "Existing Tokens")
+//   - JSON request/response bodies throughout.
 
-const BASE_URL = "https://shipsgo.com/api/v1.2/ContainerService";
+const BASE_URL = "https://api.shipsgo.com/v2";
 
 class ShipsGoError extends Error {
   constructor(message, status, body) {
@@ -19,80 +19,71 @@ class ShipsGoError extends Error {
   }
 }
 
-function client(authCode) {
+function client(token) {
   const fetchImpl = () => globalThis.fetch || require("node-fetch");
 
-  async function postForm(path, params) {
+  async function request(method, path, body) {
     const fetchFn = fetchImpl();
-    const body = new URLSearchParams({ authCode, ...params });
     const res = await fetchFn(`${BASE_URL}${path}`, {
-      method: "POST",
+      method,
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Shipsgo-User-Token": token,
       },
-      body,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    const text = await res.text();
-    return parseResponse(res, text);
-  }
 
-  async function get(path, params) {
-    const fetchFn = fetchImpl();
-    const qs = new URLSearchParams({ authCode, ...params });
-    const res = await fetchFn(`${BASE_URL}${path}?${qs.toString()}`, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-    });
     const text = await res.text();
-    return parseResponse(res, text);
-  }
-
-  function parseResponse(res, text) {
     let data = null;
     if (text && text.trim()) {
       try {
         data = JSON.parse(text);
       } catch (e) {
-        // Some ShipsGo responses are a bare integer (the request id) or plain
-        // text rather than JSON.
-        data = text.trim();
+        data = { message: text.trim() };
       }
     }
+
     if (!res.ok) {
-      const message =
-        (data && typeof data === "object" && (data.Message || data.message)) ||
-        (typeof data === "string" ? data : res.statusText);
+      const message = (data && data.message) || res.statusText;
       throw new ShipsGoError(message, res.status, data);
     }
+
     return data;
   }
 
   return {
-    /** Create a tracking request from a container number (simple form). */
-    async postContainerInfo({ containerNumber, shippingLine }) {
-      return postForm("/PostContainerInfo", { containerNumber, shippingLine });
+    /**
+     * Create (or, per ShipsGo's dedup rules, resolve to an existing) ocean
+     * shipment tracking request. Provide container_number OR booking_number.
+     * carrier (SCAC) is optional — omit it when unsure and ShipsGo will
+     * attempt its own detection from the number.
+     */
+    async createShipment({ reference, carrier, bookingNumber, containerNumber, followers, tags } = {}) {
+      const body = { reference: reference || null };
+      if (carrier) body.carrier = carrier;
+      if (bookingNumber) body.booking_number = bookingNumber;
+      if (containerNumber) body.container_number = containerNumber;
+      if (followers) body.followers = followers;
+      if (tags) body.tags = tags;
+      return request("POST", "/ocean/shipments", body);
     },
 
-    /** Create a tracking request from a Master BL or booking number (simple form). */
-    async postContainerInfoWithBl({ blContainersRef, shippingLine, containerNumber }) {
-      return postForm("/PostContainerInfoWithBl", {
-        blContainersRef,
-        shippingLine,
-        containerNumber: containerNumber || "",
-      });
+    async getShipment(shipmentId) {
+      return request("GET", `/ocean/shipments/${shipmentId}`);
     },
 
-    /** Poll voyage data for a previously created tracking request. */
-    async getContainerInfo(requestId, { mapPoint = false } = {}) {
-      const params = { requestId };
-      if (mapPoint) params.mapPoint = "true";
-      return get("/GetContainerInfo/", params);
+    async listShipments(query = "") {
+      return request("GET", `/ocean/shipments${query ? `?${query}` : ""}`);
     },
 
-    /** List of carrier names ShipsGo recognizes for the {shippingLine} field. */
-    async getShippingLineList() {
-      return get("/GetShippingLineList", {});
+    /** Route/vessel-position map data. Experimental per ShipsGo's docs, but
+     * documented as part of standard (non-paid-gated) API access. */
+    async getShipmentGeoJson(shipmentId) {
+      return request("GET", `/ocean/shipments/${shipmentId}/geojson`);
+    },
+
+    async listCarriers() {
+      return request("GET", "/ocean/carriers");
     },
   };
 }

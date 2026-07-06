@@ -1,86 +1,38 @@
-const { findPortCoordsByName } = require("./ports");
+// Maps ShipsGo v2 API responses (confirmed shape, from their official docs
+// and real example payloads) into the flat shape public/app.js renders.
 
-/**
- * ShipsGo's official docs describe the fields conceptually (POL/POD names,
- * vessel name, ETD/ETA, status) but don't publish an exhaustive JSON key
- * reference. Their backend is .NET-style (PascalCase endpoint names like
- * GetContainerInfo), so PascalCase JSON keys are the most likely shape —
- * but we look up several casing variants defensively so a mismatch doesn't
- * silently break the page. If ShipsGo's real response uses different key
- * names than the ones tried here, extend CANDIDATES rather than rewriting
- * the whole normalizer.
- */
-function pick(obj, names) {
-  if (!obj || typeof obj !== "object") return null;
-  for (const name of names) {
-    if (obj[name] !== undefined && obj[name] !== null && obj[name] !== "") {
-      return obj[name];
-    }
-  }
-  return null;
-}
-
-// StatusId meanings per ShipsGo's FAQ/docs.
-const STATUS_LABELS = {
-  20: "In Progress",
-  30: "Booked",
-  35: "Loaded",
-  40: "Sailing",
-  45: "Arrived",
-  50: "Discharged",
-  60: "Untracked",
+// Friendly labels for the container movement event codes ShipsGo uses.
+// Confirmed from a real "OCEAN.SHIPMENTS.SHIPMENT_UPDATED" webhook example.
+const EVENT_LABELS = {
+  EMSH: "Empty Container Picked Up",
+  GTIN: "Gate In (Full) at Origin",
+  LOAD: "Loaded on Vessel",
+  DEPA: "Departed",
+  ARRV: "Arrived",
+  DISC: "Discharged from Vessel",
+  GTOT: "Gate Out (Picked Up)",
+  EMRT: "Empty Container Returned",
 };
 
-function buildMilestones(data) {
-  const statusId = Number(pick(data, ["StatusId", "statusId", "status_id"]));
-  const pol = pick(data, ["Pol", "POL", "PortOfLoading", "pol"]);
-  const pod = pick(data, ["Pod", "POD", "PortOfDischarge", "pod"]);
-
-  const etd = pick(data, ["Etd", "ETD", "DepartureDate", "PolEtd"]);
-  const atd = pick(data, ["Atd", "ATD", "PolAtd"]);
-  const eta = pick(data, ["Eta", "ETA", "ArrivalDate", "PodEta"]);
-  const ata = pick(data, ["Ata", "ATA", "PodAta"]);
-  const dischargeDate = pick(data, ["DischargeDate", "PodDischargeDate"]);
-
-  return [
-    {
-      key: "departed",
-      label: "Departed Port of Loading",
-      at: atd || (statusId >= 40 ? etd : null),
-      eta: etd,
-      done: statusId >= 40 || Boolean(atd),
-    },
-    {
-      key: "arrived",
-      label: "Arrived at Port of Discharge",
-      at: ata || (statusId >= 45 ? eta : null),
-      eta: eta,
-      done: statusId >= 45,
-    },
-    {
-      key: "discharged",
-      label: "Discharged from Vessel",
-      at: dischargeDate,
-      done: statusId >= 50,
-    },
-  ];
+function buildMilestones(container) {
+  if (!container || !Array.isArray(container.movements)) return [];
+  return container.movements.map((m, i) => ({
+    key: `${m.event}-${i}`,
+    label: EVENT_LABELS[m.event] || m.event,
+    at: m.status === "ACT" ? m.timestamp : null,
+    eta: m.status !== "ACT" ? m.timestamp : null,
+    done: m.status === "ACT",
+    location: m.location ? m.location.name : null,
+  }));
 }
 
-/**
- * Turn a ShipsGo GetContainerInfo response into the flat shape the frontend
- * renders (same contract used previously for Terminal49, so the frontend
- * needed no changes).
- */
-function normalizeShipsGo({ data, requestNumber, requestId }) {
-  if (!data || (Array.isArray(data) && data.length === 0)) {
-    return { status: "pending", trackingRequestId: requestId };
+/** Turn a GET /ocean/shipments/{id} response into the frontend contract. */
+function normalizeShipsGo({ shipment, geojson, requestNumber }) {
+  if (!shipment) {
+    return { status: "pending", trackingRequestId: requestNumber };
   }
 
-  // Some ShipsGo responses wrap the payload in an array or a "Data" key.
-  const record = Array.isArray(data) ? data[0] : data.Data || data.data || data;
-
-  const statusId = Number(pick(record, ["StatusId", "statusId", "status_id"]));
-  if (statusId === 60) {
+  if (shipment.status === "UNTRACKED") {
     return {
       status: "error",
       message:
@@ -88,84 +40,109 @@ function normalizeShipsGo({ data, requestNumber, requestId }) {
     };
   }
 
-  const polName = pick(record, ["Pol", "POL", "PortOfLoading", "pol"]);
-  const podName = pick(record, ["Pod", "POD", "PortOfDischarge", "pod"]);
-  const polCoords = findPortCoordsByName(polName);
-  const podCoords = findPortCoordsByName(podName);
-
-  const vesselLat = pick(record, ["Latitude", "latitude", "Lat"]);
-  const vesselLon = pick(record, ["Longitude", "longitude", "Lng", "Lon"]);
-
-  const containersRaw =
-    pick(record, ["Containers", "ContainerList", "containers"]) || [];
-  const containerNumbers = Array.isArray(containersRaw)
-    ? containersRaw.map((c) => (typeof c === "string" ? c : pick(c, ["ContainerNumber", "Number"])))
-    : [];
-  if (!containerNumbers.length) {
-    const single = pick(record, ["ContainerNumber", "Container"]);
-    if (single) containerNumbers.push(single);
+  // route is null until ShipsGo has pulled initial data from the carrier.
+  if (!shipment.route) {
+    return { status: "pending", trackingRequestId: shipment.id };
   }
+
+  const pol = shipment.route.port_of_loading;
+  const pod = shipment.route.port_of_discharge;
+  const containers = Array.isArray(shipment.containers) ? shipment.containers : [];
+  const primary = containers[0];
 
   const result = {
     status: "success",
     demo: false,
     shipment: {
-      billOfLading: pick(record, ["BlContainersRef", "BLContainersRef", "Bl", "BookingNumber"]) || requestNumber,
+      billOfLading: shipment.booking_number || shipment.container_number || String(shipment.id),
       carrier: {
-        scac: null,
-        name: pick(record, ["ShippingLine", "Carrier", "CarrierName"]),
+        scac: shipment.carrier ? shipment.carrier.scac : null,
+        name: shipment.carrier ? shipment.carrier.name : null,
       },
-      vessel: {
-        name: pick(record, ["VesselName", "Vessel"]),
-        voyage: pick(record, ["Voyage", "VoyageNumber"]),
-      },
+      vessel: getCurrentVessel(primary),
       pol: {
-        name: polName,
-        locode: null,
-        lat: polCoords ? polCoords.lat : null,
-        lon: polCoords ? polCoords.lon : null,
-        etd: pick(record, ["Etd", "ETD"]),
-        atd: pick(record, ["Atd", "ATD"]),
+        name: pol ? pol.location.name : null,
+        locode: pol ? pol.location.code : null,
+        lat: null,
+        lon: null,
+        etd: pol ? pol.date_of_loading_initial : null,
+        atd: pol ? pol.date_of_loading : null,
       },
       pod: {
-        name: podName,
-        locode: null,
-        lat: podCoords ? podCoords.lat : null,
-        lon: podCoords ? podCoords.lon : null,
-        eta: pick(record, ["Eta", "ETA"]),
-        ata: pick(record, ["Ata", "ATA"]),
+        name: pod ? pod.location.name : null,
+        locode: pod ? pod.location.code : null,
+        lat: null,
+        lon: null,
+        eta: pod ? pod.date_of_discharge_predicted || pod.date_of_discharge_initial : null,
+        ata: pod && shipment.status === "DISCHARGED" ? pod.date_of_discharge : null,
       },
-      milestones: buildMilestones(record),
-      statusLabel: STATUS_LABELS[statusId] || null,
+      milestones: buildMilestones(primary),
+      statusLabel: shipment.status,
+      transitPercentage: shipment.route.transit_percentage,
     },
-    containers: containerNumbers.filter(Boolean).map((number) => ({
-      number,
-      equipmentType: null,
+    containers: containers.map((c) => ({
+      number: c.number,
+      equipmentType: c.size && c.type ? `${c.size}${c.type}` : c.type || null,
       weightLbs: null,
       lastFreeDay: null,
-      availableForPickup: statusId >= 50,
+      availableForPickup: c.status === "GATE_OUT" || c.status === "EMPTY_RETURN",
       holds: [],
       fees: [],
     })),
   };
 
-  if (vesselLat != null && vesselLon != null) {
-    result.route = {
-      live: true,
-      vessel: { lat: Number(vesselLat), lon: Number(vesselLon), name: result.shipment.vessel.name },
-      pol: polCoords ? { name: polCoords.name, lat: polCoords.lat, lon: polCoords.lon, label: "POL" } : null,
-      pod: podCoords ? { name: podCoords.name, lat: podCoords.lat, lon: podCoords.lon, label: "POD" } : null,
-    };
+  // Fill in port coordinates from the geojson response if we fetched one
+  // (its Point features carry lon/lat for every port in the route).
+  if (geojson && Array.isArray(geojson.features)) {
+    const polPoint = findPortPoint(geojson.features, result.shipment.pol.locode);
+    const podPoint = findPortPoint(geojson.features, result.shipment.pod.locode);
+    if (polPoint) {
+      result.shipment.pol.lat = polPoint.geometry.coordinates[1];
+      result.shipment.pol.lon = polPoint.geometry.coordinates[0];
+    }
+    if (podPoint) {
+      result.shipment.pod.lat = podPoint.geometry.coordinates[1];
+      result.shipment.pod.lon = podPoint.geometry.coordinates[0];
+    }
+    result.route = { live: true, geojson };
   } else {
     result.route = {
       live: false,
-      note: "Live vessel coordinates aren't available for this shipment yet (only shown while a container is actively sailing) — showing origin/destination ports instead.",
-      pol: polCoords ? { name: polCoords.name, lat: polCoords.lat, lon: polCoords.lon, label: "POL" } : null,
-      pod: podCoords ? { name: podCoords.name, lat: podCoords.lat, lon: podCoords.lon, label: "POD" } : null,
+      note: "Route map isn't available for this shipment yet.",
+      pol: result.shipment.pol.lat != null
+        ? { name: result.shipment.pol.name, lat: result.shipment.pol.lat, lon: result.shipment.pol.lon, label: "POL" }
+        : null,
+      pod: result.shipment.pod.lat != null
+        ? { name: result.shipment.pod.name, lat: result.shipment.pod.lat, lon: result.shipment.pod.lon, label: "POD" }
+        : null,
     };
   }
 
   return result;
 }
 
-module.exports = { normalizeShipsGo, pick, STATUS_LABELS };
+function findPortPoint(features, locode) {
+  if (!locode) return null;
+  return features.find(
+    (f) =>
+      f.geometry &&
+      f.geometry.type === "Point" &&
+      f.properties &&
+      f.properties.location &&
+      f.properties.location.code === locode
+  );
+}
+
+/** Pull vessel name/voyage off the most recent movement that has one. */
+function getCurrentVessel(container) {
+  if (!container || !Array.isArray(container.movements)) return { name: null, voyage: null };
+  for (let i = container.movements.length - 1; i >= 0; i--) {
+    const m = container.movements[i];
+    if (m.vessel && m.vessel.name) {
+      return { name: m.vessel.name, voyage: m.voyage || null };
+    }
+  }
+  return { name: null, voyage: null };
+}
+
+module.exports = { normalizeShipsGo, EVENT_LABELS };

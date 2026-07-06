@@ -1,5 +1,5 @@
 const { normalizeShipsGo } = require("./shipsgo-normalize");
-const { guessShippingLineFromContainerNumber } = require("./shipping-lines");
+const { ShipsGoError } = require("./shipsgo");
 
 // ISO 6346 container numbers: 4 letters + 7 digits.
 const CONTAINER_NUMBER_RE = /^[A-Z]{4}\d{7}$/;
@@ -12,62 +12,80 @@ function looksLikeContainerNumber(number) {
   return CONTAINER_NUMBER_RE.test(number.toUpperCase().replace(/\s+/g, ""));
 }
 
-/** Create a ShipsGo tracking request, returning its requestId. */
-async function createTrackingRequest(shipsgo, number) {
-  const clean = number.trim();
+/**
+ * Create a ShipsGo shipment, returning its numeric id. ShipsGo itself
+ * handles de-duping: re-tracking the same container/booking number returns
+ * a 409 with the existing shipment's id attached, at no extra credit cost —
+ * so we just unwrap that instead of maintaining our own lookup.
+ */
+async function createShipment(shipsgo, number) {
+  const clean = number.trim().toUpperCase();
+  const isContainer = looksLikeContainerNumber(clean);
 
-  if (looksLikeContainerNumber(clean)) {
-    const shippingLine = guessShippingLineFromContainerNumber(clean);
-    const res = await shipsgo.postContainerInfo({ containerNumber: clean, shippingLine });
-    return extractRequestId(res);
+  const payload = {
+    reference: `TRACK-${clean}`.slice(0, 128),
+  };
+  if (isContainer) {
+    payload.containerNumber = clean;
+  } else {
+    payload.bookingNumber = clean;
   }
 
-  // Treat anything else (Master BL or booking number) as blContainersRef.
-  // We don't have a reliable way to guess the carrier from a BL/booking
-  // number, so we fall back to "OTHERS", which ShipsGo's docs say is valid.
-  const res = await shipsgo.postContainerInfoWithBl({
-    blContainersRef: clean,
-    shippingLine: "OTHERS",
-  });
-  return extractRequestId(res);
-}
-
-function extractRequestId(res) {
-  if (typeof res === "number") return res;
-  if (typeof res === "string" && /^\d+$/.test(res.trim())) return res.trim();
-  if (res && typeof res === "object") {
-    const id = res.RequestId ?? res.requestId ?? res.Id ?? res.id;
-    if (id != null) return id;
+  try {
+    const res = await shipsgo.createShipment(payload);
+    return res.shipment.id;
+  } catch (err) {
+    if (err instanceof ShipsGoError && err.status === 409 && err.body && err.body.shipment) {
+      return err.body.shipment.id;
+    }
+    if (err instanceof ShipsGoError && err.status === 402) {
+      const e = new Error(
+        "Your ShipsGo account doesn't have enough credits to track a new shipment. Buy more at https://shipsgo.com/pricing."
+      );
+      e.isUserError = true;
+      throw e;
+    }
+    throw err;
   }
-  const err = new Error("ShipsGo didn't return a recognizable request id for this tracking request.");
-  err.isUserError = true;
-  throw err;
 }
 
-async function resolveTrackingRequest(shipsgo, requestId, number) {
-  const data = await shipsgo.getContainerInfo(requestId, { mapPoint: true });
-  return normalizeShipsGo({ data, requestNumber: number, requestId });
+async function resolveShipment(shipsgo, shipmentId) {
+  const res = await shipsgo.getShipment(shipmentId);
+  const shipment = res.shipment;
+
+  let geojson = null;
+  if (shipment && shipment.route) {
+    try {
+      const geoRes = await shipsgo.getShipmentGeoJson(shipmentId);
+      geojson = geoRes.geojson;
+    } catch (err) {
+      // Non-fatal — the normalizer falls back to a route-less view.
+      geojson = null;
+    }
+  }
+
+  return normalizeShipsGo({ shipment, geojson, requestNumber: shipmentId });
 }
 
 /**
- * Full flow for a brand-new search: create the tracking request, then poll
- * briefly so fast-resolving requests can return in one round trip.
+ * Full flow for a brand-new search: create the shipment, then poll briefly
+ * so fast-resolving requests can return in one round trip.
  */
 async function trackNumber(shipsgo, number, { maxAttempts = 3, delayMs = 3000 } = {}) {
-  const requestId = await createTrackingRequest(shipsgo, number);
+  const shipmentId = await createShipment(shipsgo, number);
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const result = await resolveTrackingRequest(shipsgo, requestId, number);
+    const result = await resolveShipment(shipsgo, shipmentId);
     if (result.status !== "pending") return result;
     if (attempt < maxAttempts - 1) await sleep(delayMs);
   }
 
-  return { status: "pending", trackingRequestId: requestId };
+  return { status: "pending", trackingRequestId: shipmentId };
 }
 
 module.exports = {
-  createTrackingRequest,
-  resolveTrackingRequest,
+  createShipment,
+  resolveShipment,
   trackNumber,
   looksLikeContainerNumber,
 };

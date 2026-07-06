@@ -191,43 +191,52 @@ function renderMap(route, shipment) {
   const bounds = [];
 
   if (route && route.live && route.geojson) {
-    note.textContent = "Live vessel position from Terminal49.";
+    note.textContent = "Route from ShipsGo.";
     route.geojson.features.forEach((feature) => {
       const props = feature.properties || {};
       if (feature.geometry.type === "Point") {
         const [lon, lat] = feature.geometry.coordinates;
         bounds.push([lat, lon]);
-        if (props.feature_type === "port") {
-          const marker = L.marker([lat, lon]).bindPopup(`<b>${props.label}</b><br>${props.name}`);
-          marker.addTo(map);
-          mapLayers.push(marker);
-        } else if (props.feature_type === "current_vessel") {
-          const marker = L.circleMarker([lat, lon], {
-            radius: 8,
-            color: "#1c4ed8",
-            fillColor: "#1c4ed8",
-            fillOpacity: 0.9,
-          }).bindPopup(`<b>${props.vessel_name || "Vessel"}</b><br>${props.vessel_location_speed || "?"} kn`);
-          marker.addTo(map);
-          mapLayers.push(marker);
-        }
+        const loc = props.location || {};
+        const marker = L.marker([lat, lon]).bindPopup(`<b>${loc.name || "Port"}</b>${loc.code ? `<br>${loc.code}` : ""}`);
+        marker.addTo(map);
+        mapLayers.push(marker);
       } else if (feature.geometry.type === "LineString") {
         const coords = feature.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
         coords.forEach((c) => bounds.push(c));
-        const isEstimate = props.feature_type !== "past_vessel_locations";
+        const isPast = props.status === "PAST";
+        const isCurrent = props.status === "CURRENT";
         const line = L.polyline(coords, {
-          color: isEstimate ? "#93a3c2" : "#1c4ed8",
-          weight: 3,
-          dashArray: isEstimate ? "6,8" : null,
+          color: isPast ? "#1c4ed8" : isCurrent ? "#1c4ed8" : "#93a3c2",
+          weight: isCurrent ? 4 : 3,
+          dashArray: isPast ? null : "6,8",
         });
+        const vesselName = props.vessel ? props.vessel.name : null;
+        if (vesselName) line.bindPopup(`<b>${vesselName}</b>${props.voyage ? `<br>Voyage ${props.voyage}` : ""}`);
         line.addTo(map);
         mapLayers.push(line);
+
+        // ShipsGo marks the vessel's live position via a `current` field on
+        // the in-progress leg. Shape isn't confirmed from real (non-null)
+        // data yet, so this reads a couple of likely forms defensively.
+        if (isCurrent && props.current) {
+          const pos = extractLonLat(props.current);
+          if (pos) {
+            const marker = L.circleMarker([pos.lat, pos.lon], {
+              radius: 8,
+              color: "#1c4ed8",
+              fillColor: "#1c4ed8",
+              fillOpacity: 0.9,
+            }).bindPopup(`<b>${vesselName || "Vessel"}</b>`);
+            marker.addTo(map);
+            mapLayers.push(marker);
+            bounds.push([pos.lat, pos.lon]);
+          }
+        }
       }
     });
   } else if (route && (route.pol || route.pod)) {
-    note.textContent =
-      route.note ||
-      "Showing origin/destination ports. Live vessel position requires a paid Terminal49 plan.";
+    note.textContent = route.note || "Showing origin/destination ports.";
     const pol = route.pol;
     const pod = route.pod;
     if (pol) {
@@ -265,4 +274,23 @@ function renderMap(route, shipment) {
       map.setView([20, 20], 2);
     }
   }, 50);
+}
+
+/** Best-effort extraction of a [lon, lat] pair from an unconfirmed shape. */
+function extractLonLat(value) {
+  if (Array.isArray(value) && value.length >= 2) {
+    return { lon: value[0], lat: value[1] };
+  }
+  if (value && typeof value === "object") {
+    if (Array.isArray(value.coordinates)) {
+      return { lon: value.coordinates[0], lat: value.coordinates[1] };
+    }
+    if (typeof value.lat === "number" && typeof value.lon === "number") {
+      return { lat: value.lat, lon: value.lon };
+    }
+    if (typeof value.latitude === "number" && typeof value.longitude === "number") {
+      return { lat: value.latitude, lon: value.longitude };
+    }
+  }
+  return null;
 }

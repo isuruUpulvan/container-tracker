@@ -4,7 +4,7 @@ const express = require("express");
 
 const { client, ShipsGoError } = require("./shipsgo");
 const { buildDemoResult } = require("./mock");
-const { trackNumber, resolveTrackingRequest } = require("./shipsgo-flow");
+const { trackNumber, resolveShipment } = require("./shipsgo-flow");
 
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.SHIPSGO_API_KEY || "";
@@ -55,7 +55,7 @@ app.get("/api/track/status/:trackingRequestId", async (req, res) => {
     return res.json(buildDemoResult("demo"));
   }
   try {
-    const result = await resolveTrackingRequest(shipsgo, req.params.trackingRequestId);
+    const result = await resolveShipment(shipsgo, req.params.trackingRequestId);
     return res.json(result);
   } catch (err) {
     return handleError(res, err);

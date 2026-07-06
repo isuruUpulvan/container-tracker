@@ -35,7 +35,7 @@ If this is the first time you've pushed from this Mac, GitHub will prompt you to
 2. Click **Add New** → **Project**, then find and import your `container-tracker` repo.
 3. Vercel auto-detects the `api/` folder as serverless functions and reads `vercel.json` for the static frontend routes — you shouldn't need to change any build settings. Leave Framework Preset as "Other".
 4. Before clicking Deploy, expand **Environment Variables** and add:
-   - `SHIPSGO_API_KEY` = your Auth Code from https://shipsgo.com/dashboard (Integration section) — sign up free, no card required (leave it out to run in demo mode)
+   - `SHIPSGO_API_KEY` = your token from the ShipsGo dashboard (Ocean -> Integrations -> ShipsGo API -> Existing Tokens) — sign up free, no card required (leave it out to run in demo mode)
    - `DEMO_MODE` = `false`
 5. Click **Deploy**. It takes under a minute. You'll get a live URL like:
    ```
@@ -55,7 +55,7 @@ If this is the first time you've pushed from this Mac, GitHub will prompt you to
    - **Start Command**: `npm start`
    - **Instance Type**: Free
 5. Under **Environment Variables**, add:
-   - `SHIPSGO_API_KEY` = your Auth Code from https://shipsgo.com/dashboard (Integration section)
+   - `SHIPSGO_API_KEY` = your token from the ShipsGo dashboard (Ocean -> Integrations -> ShipsGo API -> Existing Tokens)
    - `DEMO_MODE` = `false`
    (If you don't have a ShipsGo key yet, leave `SHIPSGO_API_KEY` blank / omit it — the app will automatically fall back to demo mode.)
 6. Click **Create Web Service**.

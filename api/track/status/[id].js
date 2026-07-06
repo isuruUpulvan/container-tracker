@@ -1,6 +1,6 @@
 const { client, ShipsGoError } = require("../../../server/shipsgo");
 const { buildDemoResult } = require("../../../server/mock");
-const { resolveTrackingRequest } = require("../../../server/shipsgo-flow");
+const { resolveShipment } = require("../../../server/shipsgo-flow");
 
 const API_KEY = process.env.SHIPSGO_API_KEY || "";
 const DEMO_MODE = process.env.DEMO_MODE === "true" || !API_KEY;
@@ -15,7 +15,7 @@ module.exports = async (req, res) => {
 
   try {
     const shipsgo = client(API_KEY);
-    const result = await resolveTrackingRequest(shipsgo, id);
+    const result = await resolveShipment(shipsgo, id);
     res.status(200).json(result);
   } catch (err) {
     if (err instanceof ShipsGoError) {
