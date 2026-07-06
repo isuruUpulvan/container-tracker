@@ -1,8 +1,8 @@
-const { client, Terminal49Error } = require("../../../server/terminal49");
+const { client, ShipsGoError } = require("../../../server/shipsgo");
 const { buildDemoResult } = require("../../../server/mock");
-const { resolveShipmentFromTrackingRequest } = require("../../../server/track-flow");
+const { resolveTrackingRequest } = require("../../../server/shipsgo-flow");
 
-const API_KEY = process.env.TERMINAL49_API_KEY || "";
+const API_KEY = process.env.SHIPSGO_API_KEY || "";
 const DEMO_MODE = process.env.DEMO_MODE === "true" || !API_KEY;
 
 module.exports = async (req, res) => {
@@ -14,11 +14,11 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const t49 = client(API_KEY);
-    const result = await resolveShipmentFromTrackingRequest(t49, id);
+    const shipsgo = client(API_KEY);
+    const result = await resolveTrackingRequest(shipsgo, id);
     res.status(200).json(result);
   } catch (err) {
-    if (err instanceof Terminal49Error) {
+    if (err instanceof ShipsGoError) {
       res.status(err.status || 502).json({ status: "error", message: err.message });
       return;
     }

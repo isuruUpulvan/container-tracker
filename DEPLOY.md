@@ -35,7 +35,7 @@ If this is the first time you've pushed from this Mac, GitHub will prompt you to
 2. Click **Add New** → **Project**, then find and import your `container-tracker` repo.
 3. Vercel auto-detects the `api/` folder as serverless functions and reads `vercel.json` for the static frontend routes — you shouldn't need to change any build settings. Leave Framework Preset as "Other".
 4. Before clicking Deploy, expand **Environment Variables** and add:
-   - `TERMINAL49_API_KEY` = your key from https://app.terminal49.com/developers/api-keys (leave it out to run in demo mode)
+   - `SHIPSGO_API_KEY` = your Auth Code from https://shipsgo.com/dashboard (Integration section) — sign up free, no card required (leave it out to run in demo mode)
    - `DEMO_MODE` = `false`
 5. Click **Deploy**. It takes under a minute. You'll get a live URL like:
    ```
@@ -55,9 +55,9 @@ If this is the first time you've pushed from this Mac, GitHub will prompt you to
    - **Start Command**: `npm start`
    - **Instance Type**: Free
 5. Under **Environment Variables**, add:
-   - `TERMINAL49_API_KEY` = your key from https://app.terminal49.com/developers/api-keys
+   - `SHIPSGO_API_KEY` = your Auth Code from https://shipsgo.com/dashboard (Integration section)
    - `DEMO_MODE` = `false`
-   (If you don't have a Terminal49 key yet, leave `TERMINAL49_API_KEY` blank / omit it — the app will automatically fall back to demo mode.)
+   (If you don't have a ShipsGo key yet, leave `SHIPSGO_API_KEY` blank / omit it — the app will automatically fall back to demo mode.)
 6. Click **Create Web Service**.
 
 Render will build and deploy automatically. First deploy takes a few minutes. You'll get a live URL like:
@@ -78,6 +78,7 @@ git push
 
 ## Notes on the free plans
 
-- **Vercel Hobby**: functions have a 10-second execution limit, which is why `api/track.js` polls Terminal49 briefly and returns `"pending"` for slower carriers — the frontend keeps polling `/api/track/status/:id` (a separate short function call) until it resolves. No always-on server, so no idle spin-down either.
+- **Vercel Hobby**: functions have a 10-second execution limit, which is why `api/track.js` polls ShipsGo briefly and returns `"pending"` for slower carriers — the frontend keeps polling `/api/track/status/:id` (a separate short function call) until it resolves. No always-on server, so no idle spin-down either.
 - **Render free tier**: the service spins down after periods of inactivity and takes ~30-60 seconds to wake up on the next request. Fine for personal/internal use; upgrade to a paid instance ($7/mo+) if you need it always-on.
-- Either way, your `TERMINAL49_API_KEY` stays in the platform's environment variables — it's never in the GitHub repo or visible in the browser.
+- Either way, your `SHIPSGO_API_KEY` stays in the platform's environment variables — it's never in the GitHub repo or visible in the browser.
+- Each new number you track consumes one of your ShipsGo credits — see https://shipsgo.com/pricing when your free 3 run out.

@@ -2,19 +2,19 @@ require("dotenv").config();
 const path = require("path");
 const express = require("express");
 
-const { client, Terminal49Error } = require("./terminal49");
+const { client, ShipsGoError } = require("./shipsgo");
 const { buildDemoResult } = require("./mock");
-const { trackNumber, resolveShipmentFromTrackingRequest } = require("./track-flow");
+const { trackNumber, resolveTrackingRequest } = require("./shipsgo-flow");
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.TERMINAL49_API_KEY || "";
+const API_KEY = process.env.SHIPSGO_API_KEY || "";
 const DEMO_MODE = process.env.DEMO_MODE === "true" || !API_KEY;
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "public")));
 
-const t49 = API_KEY ? client(API_KEY) : null;
+const shipsgo = API_KEY ? client(API_KEY) : null;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -22,9 +22,9 @@ function sleep(ms) {
 
 function handleError(res, err) {
   if (err.isUserError) {
-    return res.status(422).json({ status: "error", message: err.message, candidates: err.candidates || [] });
+    return res.status(422).json({ status: "error", message: err.message });
   }
-  if (err instanceof Terminal49Error) {
+  if (err instanceof ShipsGoError) {
     return res.status(err.status || 502).json({ status: "error", message: err.message });
   }
   console.error(err);
@@ -43,9 +43,7 @@ app.post("/api/track", async (req, res) => {
   }
 
   try {
-    // The Express server is long-lived, so we can afford a slightly longer
-    // poll window than the serverless (Vercel) version in api/track.js.
-    const result = await trackNumber(t49, number, { maxAttempts: 3, delayMs: 2500 });
+    const result = await trackNumber(shipsgo, number, { maxAttempts: 3, delayMs: 3000 });
     return res.json(result);
   } catch (err) {
     return handleError(res, err);
@@ -57,7 +55,7 @@ app.get("/api/track/status/:trackingRequestId", async (req, res) => {
     return res.json(buildDemoResult("demo"));
   }
   try {
-    const result = await resolveShipmentFromTrackingRequest(t49, req.params.trackingRequestId);
+    const result = await resolveTrackingRequest(shipsgo, req.params.trackingRequestId);
     return res.json(result);
   } catch (err) {
     return handleError(res, err);
@@ -70,5 +68,5 @@ app.get("/api/config", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Container tracker running at http://localhost:${PORT}`);
-  console.log(DEMO_MODE ? "Running in DEMO MODE (no API key set)." : "Using live Terminal49 API.");
+  console.log(DEMO_MODE ? "Running in DEMO MODE (no API key set)." : "Using live ShipsGo API.");
 });

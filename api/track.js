@@ -1,8 +1,8 @@
-const { client, Terminal49Error } = require("../server/terminal49");
+const { client, ShipsGoError } = require("../server/shipsgo");
 const { buildDemoResult } = require("../server/mock");
-const { trackNumber } = require("../server/track-flow");
+const { trackNumber } = require("../server/shipsgo-flow");
 
-const API_KEY = process.env.TERMINAL49_API_KEY || "";
+const API_KEY = process.env.SHIPSGO_API_KEY || "";
 const DEMO_MODE = process.env.DEMO_MODE === "true" || !API_KEY;
 
 module.exports = async (req, res) => {
@@ -25,18 +25,18 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const t49 = client(API_KEY);
+    const shipsgo = client(API_KEY);
     // Vercel's Hobby plan caps function execution at 10s, so we poll less
     // than the long-lived Express server does — the frontend already polls
     // /api/track/status/:id on its own if this returns "pending".
-    const result = await trackNumber(t49, number, { maxAttempts: 2, delayMs: 2500 });
+    const result = await trackNumber(shipsgo, number, { maxAttempts: 2, delayMs: 3000 });
     res.status(200).json(result);
   } catch (err) {
     if (err.isUserError) {
-      res.status(422).json({ status: "error", message: err.message, candidates: err.candidates || [] });
+      res.status(422).json({ status: "error", message: err.message });
       return;
     }
-    if (err instanceof Terminal49Error) {
+    if (err instanceof ShipsGoError) {
       res.status(err.status || 502).json({ status: "error", message: err.message });
       return;
     }

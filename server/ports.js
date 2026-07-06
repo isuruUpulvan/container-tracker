@@ -129,4 +129,25 @@ function getPortCoords(locode) {
   return PORT_COORDS[key] || null;
 }
 
-module.exports = { getPortCoords, PORT_COORDS };
+/**
+ * Fallback for providers (like ShipsGo) that return a port name rather than
+ * a UN/LOCODE. Matches loosely: exact name match first, then substring, so
+ * "Shanghai" matches "Shanghai" and "Port of Shanghai" alike.
+ */
+function findPortCoordsByName(name) {
+  if (!name) return null;
+  const needle = String(name).trim().toLowerCase();
+  if (!needle) return null;
+
+  let best = null;
+  for (const entry of Object.values(PORT_COORDS)) {
+    const hay = entry.name.toLowerCase();
+    if (hay === needle) return entry;
+    if (!best && (hay.includes(needle) || needle.includes(hay))) {
+      best = entry;
+    }
+  }
+  return best;
+}
+
+module.exports = { getPortCoords, findPortCoordsByName, PORT_COORDS };
