@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: container-tracker
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: TERMINAL49_API_KEY
+        sync: false
+      - key: DEMO_MODE
+        value: "false"

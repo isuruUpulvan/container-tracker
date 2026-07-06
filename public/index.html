@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Container Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="demo-banner" class="demo-banner hidden">
+    Running on demo data — add a Terminal49 API key in <code>.env</code> to track real shipments.
+  </div>
+
+  <header class="site-header">
+    <div class="brand">Container Tracker</div>
+    <p class="tagline">Track a shipment by container number or Bill of Lading number</p>
+  </header>
+
+  <main>
+    <form id="search-form" class="search-form" autocomplete="off">
+      <input
+        id="search-input"
+        type="text"
+        placeholder="e.g. MSCU1234567 or MAEU123456789"
+        aria-label="Container or Bill of Lading number"
+        required
+      />
+      <button type="submit" id="search-btn">Track</button>
+    </form>
+
+    <div id="status-area" class="status-area hidden"></div>
+
+    <section id="results" class="results hidden">
+      <div class="result-grid">
+        <div class="card summary-card">
+          <div class="summary-header">
+            <div>
+              <div class="label">Bill of Lading</div>
+              <div id="bol-value" class="value">—</div>
+            </div>
+            <div>
+              <div class="label">Carrier</div>
+              <div id="carrier-value" class="value">—</div>
+            </div>
+            <div>
+              <div class="label">Vessel / Voyage</div>
+              <div id="vessel-value" class="value">—</div>
+            </div>
+          </div>
+
+          <div class="route-row">
+            <div class="port-block">
+              <div class="port-label">POL</div>
+              <div id="pol-name" class="port-name">—</div>
+              <div id="pol-date" class="port-date"></div>
+            </div>
+            <div class="route-arrow">&#8594;</div>
+            <div class="port-block">
+              <div class="port-label">POD</div>
+              <div id="pod-name" class="port-name">—</div>
+              <div id="pod-date" class="port-date"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card map-card">
+          <div id="map" class="map"></div>
+          <div id="map-note" class="map-note"></div>
+        </div>
+
+        <div class="card timeline-card">
+          <h3>Milestones</h3>
+          <ol id="timeline" class="timeline"></ol>
+        </div>
+
+        <div class="card containers-card">
+          <h3>Containers</h3>
+          <div id="containers-list" class="containers-list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

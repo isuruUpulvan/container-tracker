@@ -1,0 +1,19 @@
+{
+  "name": "container-tracker",
+  "version": "1.0.0",
+  "description": "Track ocean freight shipments by container number or Bill of Lading number, powered by the Terminal49 API.",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^2.7.0"
+  }
+}
